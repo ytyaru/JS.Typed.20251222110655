@@ -1,4 +1,8 @@
 (function(){
+class ArgumentError extends Error {constructor(msg, cause) {cause ? super(msg, cause) : super(msg); this.name = 'ArgumentError';}}
+class AssertionError extends Error {constructor(msg, cause) {cause ? super(msg, cause) : super(msg); this.name = 'AssertionError';}}
+class TypeAssertionError extends AssertionError {constructor(msg, cause) {super(msg, cause); this.name = 'TypeAssertionError';}}
+class ValueAssertionError extends AssertionError {constructor(msg, cause) {super(msg, cause); this.name = 'ValueAssertionError';}}
 class TypeAssertion {
     static assert(v, fn) {return fn(new TypeAssertion(v,fn))}
     constructor(v, fn) {this._ = {v:v, fn:fn}}
@@ -11,8 +15,8 @@ class TypeAssertion {
         return ObjectLikeAssertion(this._.v, this._.fn);
     }
     _throw(t, m, em, am) {
-        const T = t ?? TypeError;
-        if (!(T instanceof Error)) {throw new TypeError(``)}
+        const T = t ?? TypeAssertionError;
+        if (!(T instanceof Error)) {throw new ArgumentError(`tはnullかErrorかそれを継承したクラスであるべきです。`)}
         throw new T(`${m ?? '型が期待値と違います。'}\n期待値: ${em}\n実際値: ${am ?? am+' ' : ''}${this._.v}`)
     }
 }
@@ -38,20 +42,22 @@ class ObjectalAssertion extends TypeAssertion {
     constructor(v, fn) {super(v, fn);}
     // object,descriptor,callable,instance
     // Object,Descriptor(DD(value),AD(get/set)),Class,Instance,ErrCls,ErrIns,ArrayLike,Ary,Uint8Array,Map,Set,...,Function,Async,Generator,Arrow,AccessorDescriptor
-    get o(v) {
+    get o(v) {// [object Object]
         if (!ObjectAssertion.is(v)) {this._throw(null, null, `[object Object]`, `${this.tag(v)}`)}
         return new ObjectAssertion(this._.v, this._.fn);
     }
-    get d() {
+    get d() {// Descriptor
         if (!DescriptorAssertion.is(v)) {this._throw(null, null, `ディスクリプタ`, `${this.tag(v)}`)}
         return new DescriptorAssertion(this._.v, this._.fn);
     }
-    get c() {
-        if (!ObjectAssertion.is(v)) {this._throw(null, null, `[object Function]`, `${this.tag(v)}`)}
+    get c() {// Callable(Constructor, Class, Method, ArrowFn, ES5Class, ES5Fn)
+        if (!CallableAssertion.is(v)) {this._throw(null, null, `'function'===typeof v`, `${this.tag(v)}`)}
         return new CallableAssertion(this._.v, this._.fn);
     }
-    get i() {
-        if (!ObjectAssertion.is(v)) {this._throw(null, null, `インスタンス`, `${this.tag(v)}`)}
+    get i() {// Instance
+        if (ObjectAssertion.is(v)) {this._throw(null, null, `インスタンス`, `オブジェクト ${this.tag(v)}`)}
+        if (DescriptorAssertion.is(v)) {this._throw(null, null, `インスタンス`, `ディスクリプタ ${this.tag(v)}`)}
+        if (CallableAssertion.is(v)) {this._throw(null, null, `インスタンス`, `呼び出し可能オブジェクト ${this.tag(v)} `)}
         return new InstanceAssertion(this._.v, this._.fn);
     }
 }
@@ -74,7 +80,7 @@ class ObjectAssertion extends ObjectalAssertion {
         const fn = isOwn ? this.#has.bind(this) : this.#hasOwn.bind(this);
         if ('string'===typeof name) {this.#hasFn(name,fn)}
         else if (Array.isArray(name) && 0<name.length && name.every(n=>'string'===typeof n)) {for(let n of name) {this.#hasFn(n,fn)}}
-        else {throw new TypeError(`nameはStringかそれだけを含むArrayであるべきです。`)}
+        else {throw new ArgumentError(`nameはStringかそれだけを含むArrayであるべきです。`)}
         return this;
     }
     #has(name) {return name in this._.v}
@@ -82,8 +88,8 @@ class ObjectAssertion extends ObjectalAssertion {
     #throwHas(name) {throw new ReferenceError(`期待するプロパティ ${name} を持っていません。`)}
     #hasFn(name, fn) {if(!fn(name)){this.#throwHas(name)}}
     prop(name, fn) {
-        if ('string'!==typeof name) {throw new TypeError(`nameはStringであるべきです。`)}
-        if ('function'!==typeof fn) {throw new TypeError(`fnはFunctionであるべきです。`}
+        if ('string'!==typeof name) {throw new ArgumentError(`nameはStringであるべきです。`)}
+        if ('function'!==typeof fn) {throw new ArgumentError(`fnはFunctionであるべきです。`}
         this.#hasFn(name,this.#has.bind(this)); // nameが存在すること
         fn(new TypeAssertion(this._.v[name])); // fnが例外発生しないこと
         return this;
@@ -138,7 +144,8 @@ class DescriptorAssertion extends ObjectalAssertion {
     }
     #has(key) {return Object.prototype.hasOwnProperty.call(this._.v, key)}
 }
-class InstanceAssertion extends ObjectalAssertion {
+//class InstanceAssertion extends ObjectalAssertion {
+class InstanceAssertion extends ObjectAssertion {
     static is(v) {return null!==v && 'object'===typeof v && !ObjectAssertion.is(v) && !CallableAssertion.is(v) && !DescriptorAssertion.is(v);}
 }
 class ExtendalClassAssertion extends CallableAssertion {// String,RegExp,ArrayBuffer,SharedArrayBuffer,DataViewは除外
@@ -158,30 +165,208 @@ class ExtendalClassAssertion extends CallableAssertion {// String,RegExp,ArrayBu
 class CollectionClassAssertion extends ExtendalClassAssertion {// String,RegExp,ArrayBuffer,SharedArrayBuffer,DataViewは除外
     static get collectionClasses() {return [Array,Map,Set,WeakMap,WeakSet,Int8Array,Uint8Array,Uint8ClampedArray,Int16Array,Uint16Array,Int32Array,Uint32Array,Float16Array,Float32Array,Float64Array,BigInt64Array,BigUint64Array]}
     static is(cls) {return this.collectionClasses.some(T=>ExtendalClassAssertion.is(cls, T))}
-    constructor(v, fn) {super(v, fn);}
+    constructor(v, b) {super(v, b);}
 }
 class CollectionInstanceAssertion extends InstanceAssertion {// String,RegExp,ArrayBuffer,SharedArrayBuffer,DataViewは除外
     static is(v) {return InstanceAssertion.is(v) && (Array.isArray(v) || CollectionClassAssertion.collectionClasses.some(T=>v instanceof T));}
+    constructor(v) {super(v, null);}
 }
+class CallableTypeAssertion extends ObjectalAssertion {// コンストラクタ、クラス、メソッド、アロー関数、関数(ES5関数)、関数オブジェクト(ES5クラス)、組込クラス／関数
+    static is(v) {return 'function'===typeof v}
+    static tag(v) {return this.is(v) ? Object.prototype.toString.call(v) : PrimitiveAssertion.tag(v)}
+    static AFn(){return (async()=>{}).constructor}
+    static GFn(){return (function*(){yield undefined;}).constructor}
+    static AGFunction(){return (async function*(){yield undefined;}).constructor}
+    constructor(v, fn) {super(v, fn);}
+    get isCallable() {
+        if ('function'!==typeof v) {this._throw(null, null, `呼出可能 'function'===typeof v`, `呼出不能 ${typeof v}`)}
+        return this;
+    }
+    get isConOrEs5() { // コンストラクタかES5関数
+        if (!this.isCallable(v) || !v.prototype) {this._throw(null, null, `コンストラクタかES5クラス/関数`, `${typeof v}`)}
+        return this;
+    }
+    get isNativeOrEs5() { // 組込コードかES5クラス
+        if (!this.isConOrEs5(v) || v.toString().startsWith('class ')) {this._throw(null, null, `組込コードかES5クラス/関数`, `${typeof v}`)}
+        return this;
+    }
+    get isEs6Cls() { // ES6 class 構文で作成された 関数オブジェクト
+        if (!this.isCallable(v) || !v.toString().startsWith('class ')) {this._throw(null, null, `ES6 class 構文で作成された関数オブジェクト`, `${typeof v}`)}
+        return this;
+    }
+    get isNonCon() { // 非コンストラクタ(アロー関数、メソッド、組込new不能関数、bind()済関数、ジェネレータ関数、Async関数)
+        if (!this.isCallable(v) || v.prototype) {this._throw(null, null, `非コンストラクタ(prototypeがないnew不能な呼出可能オブジェクト。例: アロー関数、メソッド、組込new不能関数、bind()済関数等)`, `${typeof v}`)}
+        return this;
+    }
+    get isArrFn() { // アロー関数
+        if (!this.isNonConFn(v) || v.toString().match(/^\w+\s*\(/))) {this._throw(null, null, `アロー関数`, `${typeof v}`)}
+        return this;
+    }
+    // isCallable
+    //   isConOrEs5
+    //     isNativeOrEs5
+    //     isEs6Class
+    //   isNonCon
+    //     isArrFn
+    get isAsync() {
+        if (v instanceof CallableTypeAssertion.AFn) {this._throw(null, null, `asyncな呼出可能オブジェクト`, `${typeof v}`)}
+        return this;
+    }
+    get isGen() {
+        if (v instanceof CallableTypeAssertion.GFn) {this._throw(null, null, `ジェネレートな呼出可能オブジェクト`, `${typeof v}`)}
+        return this;
+    }
+    get isAsyncGen() {
+        if (v instanceof CallableTypeAssertion.AGFn) {this._throw(null, null, `asyncでジェネレートな呼出可能オブジェクト`, `${typeof v}`)}
+        return this;
+    }
+}
+// Value
+class ValueAssertion {
+    constructor(v) {this._={v:v}}
+    eq(v) {
+        if (v!==this._.v) {this._throw(`同値を期待しましたが異値です。`, v)}
+        return this;
+    }
+    ne(v) {
+        if (v===this._.v) {this._throw(`異値を期待しましたが同値です。`, v)}
+        return this;
+    }
+    a(fn) {
+        if ('function'!==typeof v) {throw new ArgumentError(`fnは関数であるべきです。戻り値は無視されるためエラー時は例外発生させてください。`)}
+        fn(this._.v);
+        return this;
+    }
+    _throw(m, e, a) {
+        const M = m ? m : `値が違います。`
+        const E = e ?  `\n期待値: ${e}` : '';
+        const A = e ? (`\n実際値: ${a ? a + ' ' : ''}${this._.v}` : '');
+        throw new ValueError(`${M}${E}${A}`);
+        //const A = e && a ? `\n実際値: ${a} ${this._.v}` : '';
+        //const A = e ? (`\n実際値: ${a ? a + ' ' : ''}${this._.v}` : '');
+        //const A = e ? (`\n実際値: ${a ? a + ' ' + String(this._.v) : ''}` : '');
+        //const A = a ? (`\n実際値: ${a}` : '') + ` ${this._.v}`;
+    }
+}
+class BooleanValueAssertion extends ValueAssertion {
+    constructor(v) {this._={v:v}}
+    get isT() {return this.eq(true)}
+    get isF() {return this.eq(false)}
+//    get isT() {return this.#is(true)}
+//    get isF() {return this.#is(false)}
+//    #is(e) {if (e!==this._.v) {this._throw(`${e}を期待しましたが違います。`, e)}; return this;}
+}
+class NumberValueAssertion extends ValueAssertion {
+    constructor(v) {this._={v:v}}
+    get isNaN() {
+        if (!Number.isNaN(this._.v)) {this._throw(`NaNを期待しましたが非NaNです。`, v)}
+        return this;
+    }
+    get isPInf() {
+        if (Number.POSITIVE_INFINITY!==this._.v) {this._throw(`正無限数を期待しましたが違います。`, v)}
+        return this;
+    }
+    get isNInf() {
+        if (Number.NEGATIVE_INFINITY!==this._.v) {this._throw(`負無限数を期待しましたが違います。`, v)}
+        return this;
+    }
+    get isFinite() {
+        if (!Number.isFinite(this._.v)) {this._throw(`有限数を期待しましたが違います。`, v)}
+        return this;
+    }
+    get isInt() {
+        if (!Number.isInteger(this._.v)) {this._throw(`整数を期待しましたが違います。`, v)}
+        return this;
+    }
+    get isSafeInt() {
+        if (!Number.isSafeInteger(this._.v)) {this._throw(`誤差なき安全な整数を期待しましたが違います。`, v)}
+        return this;
+    }
+    get isPSI() {// PositiveSafeInteger
+        if (!Number.isSafeInteger(this._.v) || this._.v < 0) {this._throw(`誤差なき安全な正の整数を期待しましたが違います。`, v)}
+        return this;
+    }
+    get isNSI() {// NegativeSafeInteger
+        if (!Number.isSafeInteger(this._.v) || 0 <= this._.v) {this._throw(`誤差なき安全な負の整数を期待しましたが違います。`, v)}
+        return this;
+    }
+    get isZ() {
+        if (0!==this._.v)) {this._throw(`0を期待しましたが違います。`, v)}
+        return this;
+    }
+    // nearlyEqual: 2つ以上の数値が「ほぼ等しい」か判定する（Number(IEEE754)の誤差を考慮して）
+    get neq(v) {
+        if (!Number.isFinite(v))) {throw new ArgumentError(`vはNumber型の有限数であるべきです。`)}
+        if (v===this._.v) {return this}
+        const diff = Math.abs(this._.v - v);
+        // 数値の大きさに応じてEPSILONをスケーリングさせる（相対誤差）
+        // 1未満の場合は Number.EPSILON をそのまま使用（絶対誤差）
+        const tolerance = Number.EPSILON * Math.max(1, Math.abs(this._.v), Math.abs(v));
+        if (diff >= tolerance) {this._throw(`ほぼ同値を期待しましたがEPSILONによる誤差を考慮した上で異値です。`, v);}
+        return this;
+    }
+}
+class StringValueAssertion extends ValueAssertion {
+    constructor(v) {this._={v:v}}
+    isL(...args) {return this.#isSize(this._.v, 'バイト', ...args)} // Length
+    isG(...args) {return this.#isSize(Array.from(this._.v), '文字', ...args)}// Graphemes
+    #isSize(chars, text, ...args) {
+        if (args.length < 1 || 2 < args.length) {throw new ArgumentError(`argsは一〜二個であるべきです。一個ならlengthが同じ、二個なら[0]〜[1]の範囲内であることを期待します。`)}
+        if (!args.every(v=>Number.SafeInteger(v) && 0<=v)) {throw new ArgumentError(`argsの値は全てNumber型で0以上の整数であるべきです。`)}
+        if (1===args.length) {
+            if (args[0]!==chars.length) {this._throw(`文字列の${text}長が期待値と違います。`, args[0], chars.length)}
+        } else {
+            const [min,max] = args;
+            if (max <= min) {throw new ArgumentError(`argsが二個の時は[0] < [1]であるべきです。`)}
+            const L = chars.length;
+            if (L < min || max < L) {this._throw(`文字列の${text}長が期待した範囲と違います。`, `${min}〜${max}`)}
+        }
+        return this;
+    }
+    match(r) {
+        if (!(r instanceof RegExp)) {throw AgumentError(`rはRegExpインスタンスであるべきです。`)}
+        const m = this._.v.match(r);
+        if (!m) {this._throw(`文字列は期待した正規表現にマッチしませんでした。`, `${r}`)}
+        return this;
+    }
+    startsWith(v) {
+        if ('string'!==typeof v) {throw AgumentError(`vは文字列であるべきです。`)}
+        if (!this._.v.startsWith(v)) {this._throw(`文字列は期待した先頭文字列と違います。`, v)}
+        return this;
+    }
+    endsWith(v) {
+        if ('string'!==typeof v) {throw AgumentError(`vは文字列であるべきです。`)}
+        if (!this._.v.endsWith(v)) {this._throw(`文字列は期待した末尾文字列と違います。`, v)}
+        return this;
+    }
+    has(v) {
+        if ('string'!==typeof v) {throw AgumentError(`vは文字列であるべきです。`)}
+        if (-1===this._.v.indexOf(v)) {this._throw(`文字列は期待した部分文字列を含みません。`, v)}
+        return this;
+    }
+}
+
+
 
 class ObservedValue {
     constructor(v, before, after) {
         this._ = {v:v, before:before, after:after}
         'before after'.split(' ').map(n=>{
-            if ([null, undefined].some(v=>v===this._[n])) {this._[n] = (()=>{});}
-            if (!isFn(this._[n]) && !isAFn(this._[n])) {throw new TypeError(`${n} はnullかundefinedか非ジェネレータな関数であるべきです。`)}
+            if ([null, undefined].some(v=>v===this._[n])) {this._[n] = null;}
+            if (!isFn(this._[n]) && !isAFn(this._[n])) {throw new ArgumentError(`${n} はnullかundefinedか非ジェネレータな関数であるべきです。`)}
         });
     }
     get v() {return this._.v}
     set v(v) {
         const o = this._.v;
-        const B = this._.before(v, o);
-        if (B) { return B }
+        const B = this#fn('before', v, o);
+        if (B) { return false }
         this._.v = v;
-        const A = this._.after(v, o);
-        if (A) { return A }
+        const A = this#fn('after', v, o);
+        if (A) { return false }
         return true;
     }
+    #fn(name, v, o) {return this._[name] ? this._[name](v, o) : false}
 }
 class TypedValue extends ObservedValue {constructor(T, v, before, after) {super(v, ()=>{T.valid(v); return before(v);}, after); this._.T = T; T.valid(v);}}
 class TypedValidator {valid(v) {throw Error(`未実装。継承してから実装してください。`)}}
