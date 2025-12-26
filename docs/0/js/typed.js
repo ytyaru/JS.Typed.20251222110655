@@ -171,6 +171,14 @@ class CollectionInstanceAssertion extends InstanceAssertion {// String,RegExp,Ar
     static is(v) {return InstanceAssertion.is(v) && (Array.isArray(v) || CollectionClassAssertion.collectionClasses.some(T=>v instanceof T));}
     constructor(v) {super(v, null);}
 }
+// ErrorClass,ErrorInstance,Window,Document,Node,Element,StyleSheet
+
+class ErrorClassAssertion extends ExtendalClassAssertion {// Errorを継承したクラスか
+    static is(v) {return ExtendalClassAssertion.is(v, Error)}
+    constructor(v) {super(v,Error);}
+    is() {return super.isExtends()}
+}
+
 class CallableTypeAssertion extends ObjectalAssertion {// コンストラクタ、クラス、メソッド、アロー関数、関数(ES5関数)、関数オブジェクト(ES5クラス)、組込クラス／関数
     static is(v) {return 'function'===typeof v}
     static tag(v) {return this.is(v) ? Object.prototype.toString.call(v) : PrimitiveAssertion.tag(v)}
